@@ -9,7 +9,7 @@ from pyrocko.trace import Trace
 from qseek.images.seisbench import PhaseNetImage, SeisBench
 
 
-@pytest.mark.parametrize("sampling_rate", [25, 100, 200])
+@pytest.mark.parametrize("sampling_rate", [5, 25, 100, 200])
 def test_nearest_peak_time_after_chopping(sampling_rate):
     tmin = 1700000000.123
     data = np.zeros(10 * sampling_rate)
@@ -34,6 +34,31 @@ def test_nearest_peak_time_after_chopping(sampling_rate):
     pick = image.search_phase_arrival(0, time(0), time(5), threshold=0.5)
     assert pick is not None
     assert pick.time == time(5.6)
+
+
+@pytest.mark.parametrize(
+    "blinding_seconds,expected_seconds", [(None, 5.06), (0.02, 5.0), (0.0, 5.0)]
+)
+def test_peak_blinding(blinding_seconds, expected_seconds):
+    tmin = 1700000000.123
+    data = np.zeros(1000)
+    data[500], data[506] = 0.35, 0.9
+    image = PhaseNetImage(
+        "SeisBench", "cake:P", 1.0, [Trace(tmin=tmin, deltat=0.01, ydata=data)], 0.2
+    )
+    kwargs = (
+        {}
+        if blinding_seconds is None
+        else {"detection_blinding_seconds": blinding_seconds}
+    )
+    pick = image.search_phase_arrival(
+        0,
+        datetime.fromtimestamp(tmin, tz=timezone.utc),
+        datetime.fromtimestamp(tmin + 5, tz=timezone.utc),
+        **kwargs,
+    )
+    assert pick is not None
+    assert pick.time == datetime.fromtimestamp(tmin + expected_seconds, tz=timezone.utc)
 
 
 @pytest.mark.asyncio

@@ -79,6 +79,7 @@ class PhaseNetImage(WaveformImage):
         modelled_arrival: datetime,
         search_window_seconds: float = 5.0,
         threshold: float = 0.1,
+        detection_blinding_seconds: float = 0.1,
     ) -> ObservedArrival | None:
         """Search for the closest peak (pick) in the station's image functions.
 
@@ -89,6 +90,8 @@ class PhaseNetImage(WaveformImage):
             search_window_seconds (float, optional): Total search length in seconds
                 around modelled arrival time. Defaults to 5.
             threshold (float, optional): Threshold for detection. Defaults to 0.1.
+            detection_blinding_seconds (float, optional): Minimum separation between
+                peaks in seconds. Defaults to 0.1.
 
         Returns:
             datetime | None: Time of arrival, None is none found.
@@ -110,6 +113,7 @@ class PhaseNetImage(WaveformImage):
             search_trace.ydata,
             height=threshold,
             prominence=threshold,
+            distance=max(1, detection_blinding_seconds / search_trace.deltat),
         )
         if False:
             import matplotlib.pyplot as plt
