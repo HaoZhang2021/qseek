@@ -294,8 +294,7 @@ class SeisBench(ImageFunction):
             return self.seisbench_model._annotate_args["blinding"][1]
 
     def get_blinding(self) -> timedelta:
-        scaled_blinding_samples = max(self.get_blinding_samples()) / self._rescale_input
-        return timedelta(seconds=scaled_blinding_samples / self.sampling_rate)
+        return timedelta(seconds=max(self.get_blinding_samples()) / self.sampling_rate)
 
     def _detection_half_width(self) -> float:
         """Half width of the detection window in seconds."""
@@ -305,9 +304,14 @@ class SeisBench(ImageFunction):
     @alog_call
     async def process_traces(self, traces: list[Trace]) -> list[PhaseNetImage]:
         stream = Stream(tr.to_obspy_trace() for tr in traces)
-        if self._rescale_input != 1.0:
-            scale = self._rescale_input
+        scale = self._rescale_input
+        time_reference = min((tr.stats.starttime for tr in stream), default=None)
+        if scale != 1.0 and time_reference is not None:
             for tr in stream:
+                # Stretch the entire time axis, including component and gap offsets.
+                tr.stats.starttime = (
+                    time_reference + (tr.stats.starttime - time_reference) * scale
+                )
                 tr.stats.sampling_rate /= scale
 
         annotations: Stream = await asyncio.to_thread(
@@ -318,16 +322,14 @@ class SeisBench(ImageFunction):
             copy=False,
         )
 
-        if self._rescale_input != 1.0:
-            scale = self._rescale_input
+        if scale != 1.0 and time_reference is not None:
             for tr in annotations:
+                # Invert the full time mapping, including prediction offsets and
+                # any leading samples trimmed by SeisBench.
+                tr.stats.starttime = (
+                    time_reference + (tr.stats.starttime - time_reference) / scale
+                )
                 tr.stats.sampling_rate *= scale
-                blinding_samples = max(self.get_blinding_samples())
-                # 100 Hz is the native sampling rate of PhaseNet
-                blinding_seconds = (
-                    blinding_samples / self._seisbench_model.sampling_rate
-                ) * (1.0 - 1 / scale)
-                tr.stats.starttime -= blinding_seconds
 
         annotated_traces: list[Trace] = [
             tr.to_pyrocko_trace()
