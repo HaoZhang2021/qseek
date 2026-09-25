@@ -179,7 +179,7 @@ class SeisBench(ImageFunction):
         "Available models are:" + ", ".join(sorted(get_args(PreTrainedName))),
     )
     window_overlap_samples: int = Field(
-        default=1500,
+        default=2000,
         ge=1000,
         le=3000,
         description="Window overlap in samples.",
@@ -260,7 +260,8 @@ class SeisBench(ImageFunction):
             self._seisbench_model = model.load(self.pretrained.with_suffix(""))
         else:
             logger.info("loading pre-trained SeisBench model %s...", self.pretrained)
-            self._seisbench_model = model.from_pretrained(self.pretrained)
+            self._seisbench_model = model.from_pretrained(self.pretrained, update=False)
+            self._seisbench_model.sampling_rate = self.sampling_rate
         if self.torch_use_cuda:
             try:
                 if isinstance(self.torch_use_cuda, bool):
@@ -308,32 +309,15 @@ class SeisBench(ImageFunction):
     @alog_call
     async def process_traces(self, traces: list[Trace]) -> list[PhaseNetImage]:
         stream = Stream(tr.to_obspy_trace() for tr in traces)
-        scale = self._rescale_input
-        time_reference = min((tr.stats.starttime for tr in stream), default=None)
-        if scale != 1.0 and time_reference is not None:
-            for tr in stream:
-                # Stretch the entire time axis, including component and gap offsets.
-                tr.stats.starttime = (
-                    time_reference + (tr.stats.starttime - time_reference) * scale
-                )
-                tr.stats.sampling_rate /= scale
 
         annotations: Stream = await asyncio.to_thread(
             self.seisbench_model.annotate,
             stream,
             overlap=self.window_overlap_samples,
             batch_size=self.batch_size,
+            stacking=self.stack_method,
             copy=False,
         )
-
-        if scale != 1.0 and time_reference is not None:
-            for tr in annotations:
-                # Invert the full time mapping, including prediction offsets and
-                # any leading samples trimmed by SeisBench.
-                tr.stats.starttime = (
-                    time_reference + (tr.stats.starttime - time_reference) / scale
-                )
-                tr.stats.sampling_rate *= scale
 
         annotated_traces: list[Trace] = [
             tr.to_pyrocko_trace()
